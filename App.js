@@ -1,7 +1,16 @@
-import { StyleSheet, Text, View, PermissionsAndroid } from "react-native";
+import {
+  StyleSheet,
+  Text,
+  View,
+  PermissionsAndroid,
+  TouchableOpacity,
+  Modal,
+  FlatList,
+} from "react-native";
 import { BleManager } from "react-native-ble-plx";
 import { useState, useEffect, useRef } from "react";
 import { atob } from "react-native-quick-base64";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const bleManager = new BleManager();
 
@@ -38,6 +47,8 @@ export default function App() {
   const [deviceID, setDeviceID] = useState(null);
   const [bpm, setBpm] = useState(0);
   const [connectionStatus, setConnectionStatus] = useState("Buscando...");
+  const [modalVisible, setModalVisible] = useState(false);
+  const [history, setHistory] = useState([]);
 
   const deviceRef = useRef(null);
 
@@ -89,6 +100,7 @@ export default function App() {
           console.log("Datos de BPM recibidos:", rawBpmData);
           const bpmValue = parseInt(rawBpmData, 10);
           setBpm(bpmValue);
+          saveReading(bpmValue);
         });
       })
       .catch((error) => {
@@ -96,6 +108,35 @@ export default function App() {
         setConnectionStatus("Error en la conexión");
       });
   };
+
+  const saveReading = async (bpmValue) => {
+    try {
+      const timestamp = new Date().toISOString();
+      const newEntry = { bpm: bpmValue, timestamp };
+      const existingHistory = await AsyncStorage.getItem("bpmHistory");
+      let historyArray = existingHistory ? JSON.parse(existingHistory) : [];
+      historyArray.push(newEntry);
+      await AsyncStorage.setItem("bpmHistory", JSON.stringify(historyArray));
+    } catch (error) {
+      console.error("Error al guardar el registro de BPM:", error);
+    }
+  };
+
+  const loadHistory = async () => {
+    try {
+      const existingHistory = await AsyncStorage.getItem("bpmHistory");
+      let historyArray = existingHistory ? JSON.parse(existingHistory) : [];
+      setHistory(historyArray);
+    } catch (error) {
+      console.error("Error al cargar el historial de BPM:", error);
+    }
+  };
+
+  useEffect(() => {
+    if (modalVisible) {
+      loadHistory();
+    }
+  }, [modalVisible]);
 
   useEffect(() => {
     const subscription = bleManager.onDeviceDisconnected(
@@ -121,8 +162,39 @@ export default function App() {
     return () => subscription.remove();
   }, [deviceID]);
 
+  // Función para obtener el mensaje y color según el BPM
+  const getBPMStatus = (bpmValue) => {
+    if (bpmValue < 60 && bpmValue > 30) {
+      return { message: "Está algo bajo, contacte a su médico", color: "red" };
+    } else if (bpmValue > 115) {
+      return { message: "Riesgo de arritmia", color: "red" };
+    } else if (bpmValue > 90) {
+      return {
+        message: "Tiene un PPM más elevado de lo normal",
+        color: "orange",
+      };
+    } else if (bpmValue > 60 && bpmValue < 90) {
+      return { message: "Corazón en buenas condiciones.", color: "green" };
+    } else {
+      return {
+        message: "Usa el dispositivo para recibir el ultimo resultado",
+        color: "white",
+      };
+    }
+  };
+
+  const bpmStatus = getBPMStatus(bpm);
+
   return (
     <View style={styles.container}>
+      <View style={styles.topButtons}>
+        <TouchableOpacity
+          style={styles.openHistoryButton}
+          onPress={() => setModalVisible(true)}
+        >
+          <Text style={styles.openHistoryButtonText}>Abrir historial</Text>
+        </TouchableOpacity>
+      </View>
       <View style={styles.contentWrapper}>
         <View style={styles.topTitle}>
           <View style={styles.titleWrapper}>
@@ -131,11 +203,53 @@ export default function App() {
         </View>
         <View style={styles.bpmWrapper}>
           <Text style={styles.bpmText}>{bpm} BPM</Text>
+          <Text style={[styles.bpmStatusText, { color: bpmStatus.color }]}>
+            {bpmStatus.message > 30 ? "Ultimo Resultado" : ""}{" "}
+            {bpmStatus.message}
+          </Text>
         </View>
       </View>
       <View style={styles.bottomWrapper}>
         <Text style={styles.connectionStatus}>{connectionStatus}</Text>
       </View>
+
+      <Modal
+        animationType="slide"
+        transparent={false}
+        visible={modalVisible}
+        onRequestClose={() => {
+          setModalVisible(false);
+        }}
+      >
+        <View style={styles.modalContainer}>
+          <Text style={styles.modalTitle}>Historial de BPM</Text>
+          <FlatList
+            data={history}
+            keyExtractor={(item, index) => index.toString()}
+            renderItem={({ item }) => {
+              const itemStatus = getBPMStatus(item.bpm);
+              return (
+                <View
+                  style={[
+                    styles.historyItem,
+                    { backgroundColor: itemStatus.color },
+                  ]}
+                >
+                  <Text style={styles.historyText}>
+                    {new Date(item.timestamp).toLocaleString()}: {item.bpm} BPM
+                  </Text>
+                </View>
+              );
+            }}
+          />
+          <TouchableOpacity
+            style={styles.closeButton}
+            onPress={() => setModalVisible(false)}
+          >
+            <Text style={styles.closeButtonText}>Cerrar</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -146,6 +260,21 @@ const styles = StyleSheet.create({
     backgroundColor: "#222",
     alignItems: "center",
     justifyContent: "center",
+  },
+  topButtons: {
+    marginTop: 50,
+    width: "100%",
+    alignItems: "center",
+  },
+  openHistoryButton: {
+    backgroundColor: "#EF664C",
+    padding: 10,
+    alignItems: "center",
+    borderRadius: 5,
+  },
+  openHistoryButtonText: {
+    color: "white",
+    fontSize: 18,
   },
   contentWrapper: {
     flex: 1,
@@ -172,7 +301,7 @@ const styles = StyleSheet.create({
     color: "white",
   },
   bpmWrapper: {
-    marginTop: 50,
+    marginTop: 20,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -180,6 +309,11 @@ const styles = StyleSheet.create({
     fontSize: 80,
     color: "#FFF386",
     fontWeight: "bold",
+  },
+  bpmStatusText: {
+    fontSize: 18,
+    marginTop: 10,
+    textAlign: "center",
   },
   bottomWrapper: {
     justifyContent: "center",
@@ -194,5 +328,37 @@ const styles = StyleSheet.create({
     fontSize: 20,
     color: "white",
     fontWeight: "bold",
+  },
+  modalContainer: {
+    flex: 1,
+    padding: 20,
+    backgroundColor: "#222",
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: "bold",
+    color: "white",
+    marginBottom: 20,
+  },
+  historyItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    marginBottom: 5,
+    borderRadius: 5,
+  },
+  historyText: {
+    fontSize: 18,
+    color: "white",
+  },
+  closeButton: {
+    marginTop: 20,
+    backgroundColor: "#EF664C",
+    padding: 10,
+    alignItems: "center",
+    borderRadius: 5,
+  },
+  closeButtonText: {
+    color: "white",
+    fontSize: 18,
   },
 });

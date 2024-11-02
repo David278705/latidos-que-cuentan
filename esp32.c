@@ -31,7 +31,7 @@ SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 BLECharacteristic *pCharacteristic;
 bool deviceConnected = false;
-uint32_t valor = 0;
+int valor = 0;
 
 class MyServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer* pServer) {
@@ -414,11 +414,11 @@ delay(2000);
 display.clearDisplay();
 display.setTextColor(SH110X_WHITE);
 display.setTextSize(1);
-display.setCursor(32, 15);
+display.setCursor(32, 5);
 display.print("Resultado: ");
 display.print(averageBPM);
 display.print("PPM");
-display.setCursor(32, 25);
+display.setCursor(32, 15);
 if(averageBPM < 60){
 display.print("Esta algo bajo, contacte a su medico");
 }
@@ -438,6 +438,7 @@ display.print("Corazon en buenas condiciones.");
   // Simulación de enviar datos cada segundo si está conectado
   if (deviceConnected) {
     String resultado = "Resultado: " + String(valor) + " PPM";
+    valor = averageBPM;
     String valorString = String(valor);
     pCharacteristic->setValue(valorString.c_str());  
     pCharacteristic->notify();
